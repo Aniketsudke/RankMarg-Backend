@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // uncomment next line if you use Prisma <5.10
+  // directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model User {
+  id       String  @id @default(uuid())
+  name     String?
+  username String  @unique
+  email    String  @unique
+  password String?
+  phone    String?
+  standard String?
+  avatar   String?
+  stream   Stream?
+  rank     Int     @default(100)
+  coins    Int     @default(0)
+
+  attempts Attempt[]
+  player1  Challenge[] @relation("U1")
+  player2  Challenge[] @relation("U2")
+
+  Locaction String?
+  Role      Role?     @default(USER)
+  provider  Provider
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+}
+
+enum Stream {
+  JEE
+  NEET
+}
+
+enum Role {
+  USER
+  INSTRUCTOR
+  ADMIN
+}
+
+enum Provider {
+  google
+  credentials
+}
+
+model Question {
+  id                String              @id @default(uuid())
+  slug              String              @unique
+  type              QuestionType
+  title             String
+  content           String
+  difficulty        String
+  topic             String
+  subject           String
+  class             String
+  stream            Stream?
+  tag               String?
+  options           Option[]
+  isnumerical       Float?
+  isTrueFalse       Boolean?
+  accuracy          Float?              @default(0)
+  questionTime      Int?                @default(5)
+  hint              String?
+  attempts          Attempt[]
+  ChallengeQuestion ChallengeQuestion[]
+  createdAt         DateTime            @default(now())
+}
+
+model Option {
+  id         String   @id @default(uuid())
+  content    String
+  isCorrect  Boolean  @default(false)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+enum QuestionType {
+  MCQ
+  NUM
+  TF
+}
+
+model Attempt {
+  userId     String
+  questionId String
+  isCorrect  Boolean  @default(false)
+  solvedAt   DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, questionId, solvedAt])
+}
+
+model Challenge {
+  challengeId       String              @id @unique
+  player1Id         String
+  player2Id         String?
+  status            String              @default("PENDING")
+  result            String?
+  player1Score      Int?                @default(0)
+  player2Score      Int?                @default(0)
+  attemptByPlayer1  Int[]               @default([])
+  attemptByPlayer2  Int[]               @default([])
+  player1           User                @relation("U1", fields: [player1Id], references: [id], onDelete: Cascade)
+  player2           User?               @relation("U2", fields: [player2Id], references: [id], onDelete: Cascade)
+  ChallengeQuestion ChallengeQuestion[]
+  endedAt           DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime?           @updatedAt
+}
+
+model ChallengeQuestion {
+  challengeId String
+  questionId  String
+
+  challenge Challenge @relation(fields: [challengeId], references: [challengeId], onDelete: Cascade)
+  question  Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([challengeId, questionId])
+}
