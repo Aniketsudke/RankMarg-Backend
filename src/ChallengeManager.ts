@@ -1,18 +1,5 @@
 import { WebSocket } from "ws";
-import {
-  GAME_OVER,
-  INIT_GAME,
-  JOIN_GAME,
-  MOVE,
-  OPPONENT_DISCONNECTED,
-  JOIN_ROOM,
-  GAME_JOINED,
-  GAME_NOT_FOUND,
-  GAME_ALERT,
-  GAME_ADDED,
-  GAME_ENDED,
-  EXIT_GAME,
-} from "./messages";
+import { GAME_ALERT } from "./messages";
 import { Challenge } from "./Challenge";
 import { db } from "./db";
 import { socketManager, User } from "./SocketManager";
@@ -49,46 +36,54 @@ export class ChallengeManager {
     );
   }
 
+  createChallenge(user: User) {
+    const challenge = new Challenge(user.userId, null);
+
+    this.challenges.push(challenge);
+    this.pendingChallengeId = challenge.challengeId;
+    socketManager.addUser(user, challenge.challengeId);
+    socketManager.broadcast(
+      challenge.challengeId,
+      JSON.stringify({
+        type: "CHALLENGE_ADD",
+        challengeId: challenge.challengeId,
+      })
+    );
+  }
+
   private addHandler(user: User) {
     user.socket.on("message", async (data) => {
       const message = JSON.parse(data.toString());
       if (message.type === "INIT_CHALLENGE") {
-        if (this.pendingChallengeId && !message.payload.invite) {
-          const challenge = this.challenges.find(
-            (x) => x.challengeId === this.pendingChallengeId
-          );
-          if (!challenge) {
-            console.error("Pending challenge not found?");
-            return;
-          }
-          if (user.userId === challenge.player1Id) {
-            socketManager.broadcast(
-              challenge.challengeId,
-              JSON.stringify({
-                type: GAME_ALERT,
-                payload: {
-                  message: "Trying to Connect with yourself?",
-                },
-              })
-            );
-            return;
-          }
-          socketManager.addUser(user, challenge.challengeId);
-          await challenge?.updateSecondPlayer(user.userId);
-          this.pendingChallengeId = null;
+        if (message.payload.invite) {
+          this.createChallenge(user);
         } else {
-          const challenge = new Challenge(user.userId, null);
-
-          this.challenges.push(challenge);
-          this.pendingChallengeId = challenge.challengeId;
-          socketManager.addUser(user, challenge.challengeId);
-          socketManager.broadcast(
-            challenge.challengeId,
-            JSON.stringify({
-              type: "CHALLENGE_ADD",
-              challengeId: challenge.challengeId,
-            })
-          );
+          if (this.pendingChallengeId) {
+            const challenge = this.challenges.find(
+              (x) => x.challengeId === this.pendingChallengeId
+            );
+            if (!challenge) {
+              console.error("Pending challenge not found?");
+              return;
+            }
+            if (user.userId === challenge.player1Id) {
+              socketManager.broadcast(
+                challenge.challengeId,
+                JSON.stringify({
+                  type: GAME_ALERT,
+                  payload: {
+                    message: "Trying to Connect with yourself?",
+                  },
+                })
+              );
+              return;
+            }
+            socketManager.addUser(user, challenge.challengeId);
+            await challenge?.updateSecondPlayer(user.userId);
+            this.pendingChallengeId = null;
+          } else {
+            this.createChallenge(user);
+          }
         }
         user.socket.send(
           JSON.stringify({
@@ -117,7 +112,7 @@ export class ChallengeManager {
         }
       }
 
-      if (message.type === EXIT_GAME) {
+      if (message.type === "CHALLENGE_EXIT") {
         const challengeId = message.payload.challengeId;
         const challenge = this.challenges.find(
           (challenge) => challenge.challengeId === challengeId
@@ -154,9 +149,18 @@ export class ChallengeManager {
           },
         });
 
-        // There is a challenge created but no second player available
-
         if (availableGame && !availableGame.player2Id) {
+          if (availableGame.player1Id === user.userId) {
+            user.socket.send(
+              JSON.stringify({
+                type: "CHALLENGE_ALERT",
+                payload: {
+                  message: "Trying to Connect with yourself?",
+                },
+              })
+            );
+            return;
+          }
           socketManager.addUser(user, availableGame.challengeId);
           await availableGame.updateSecondPlayer(user.userId);
           return;
@@ -165,11 +169,15 @@ export class ChallengeManager {
         if (!challengeFromDb) {
           user.socket.send(
             JSON.stringify({
-              type: GAME_NOT_FOUND,
+              type: "CHALLENGE_ALERT",
+              payload: {
+                message: "Challenge not found",
+              },
             })
           );
           return;
         }
+
         const questions = challengeFromDb.ChallengeQuestion.map(
           (q) => q.question
         );
@@ -211,6 +219,20 @@ export class ChallengeManager {
           this.challenges.push(challenge);
           availableGame = challenge;
         }
+        if (
+          availableGame?.player1Id !== user.userId &&
+          availableGame?.player2Id !== user.userId
+        ) {
+          user.socket.send(
+            JSON.stringify({
+              type: "CHALLENGE_ALERT",
+              payload: {
+                message: "You are not part of this game",
+              },
+            })
+          );
+          return;
+        }
 
         user.socket.send(
           JSON.stringify({
@@ -225,6 +247,15 @@ export class ChallengeManager {
         );
 
         socketManager.addUser(user, challengeId);
+      }
+      if (message.type === "USER_REMOVE") {
+        socketManager.removeUser(user);
+        // db.challenge.delete({
+        //   where: {
+        //     challengeId: this.pendingChallengeId ?? undefined,
+        //   },
+        // });
+        this.pendingChallengeId = null;
       }
     });
   }

@@ -31,7 +31,6 @@ class SocketManager {
     if (SocketManager.instance) {
       return SocketManager.instance;
     }
-
     SocketManager.instance = new SocketManager();
     return SocketManager.instance;
   }
@@ -62,6 +61,7 @@ class SocketManager {
       console.error("User was not interested in any room?");
       return;
     }
+
     const room = this.interestedSockets.get(roomId) || [];
     const remainingUsers = room.filter((u) => u.userId !== user.userId);
     this.interestedSockets.set(roomId, remainingUsers);
